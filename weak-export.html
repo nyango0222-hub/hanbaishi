@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>販売士1級 苦手問題 書き出し</title>
+<style>
+  :root{
+    --ink:#1b2440;
+    --ink-soft:#4a5473;
+    --paper:#fafaf7;
+    --line:#d9dbe3;
+    --navy:#243b6b;
+    --ok:#1f7a4d;
+    --ng:#b83227;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{min-height:100%}
+  body{
+    font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",system-ui,sans-serif;
+    background:var(--paper);color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .app{max-width:620px;margin:0 auto;padding:20px 18px 40px;min-height:100vh}
+  header{border-bottom:2px solid var(--navy);padding-bottom:10px;margin-bottom:18px}
+  header h1{font-size:17px;font-weight:700;color:var(--navy)}
+  header p{font-size:12px;color:var(--ink-soft);margin-top:4px;line-height:1.6}
+  .summary{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px}
+  .summary .count{font-size:30px;font-weight:700;color:var(--ng)}
+  .summary .count small{font-size:14px;color:var(--ink-soft);font-weight:500}
+  .note{font-size:12px;color:var(--ink-soft);line-height:1.7;margin-top:8px}
+  .actions{display:flex;flex-direction:column;gap:10px;margin:14px 0 20px}
+  button,a.btn{
+    font:inherit;border:0;cursor:pointer;border-radius:var(--radius);padding:14px 16px;font-size:15px;font-weight:600;
+    text-decoration:none;text-align:center;display:block
+  }
+  .main{background:var(--navy);color:#fff}
+  .sub{background:#fff;color:var(--navy);border:1px solid var(--navy)}
+  .status{font-size:13px;color:var(--ok);min-height:1.4em;text-align:center}
+  .item{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:10px}
+  .meta{font-size:11px;color:var(--ink-soft);margin-bottom:7px;line-height:1.5}
+  .q{font-size:15px;line-height:1.85}
+  .a{font-size:14px;line-height:1.7;color:var(--navy);font-weight:700;margin-top:8px}
+  .empty,.error{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:24px 16px;text-align:center;font-size:14px;line-height:1.8;color:var(--ink-soft)}
+  .error{color:var(--ng)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>販売士1級 苦手問題 書き出し</h1>
+    <p>元の問題集に保存されている「× 不正解」の問題を読み取り、問題文＋正解を書き出します。</p>
+  </header>
+
+  <div id="loading" class="empty">苦手問題を読み込んでいます…</div>
+
+  <main id="main" hidden>
+    <div class="summary">
+      <div class="count"><span id="count">0</span><small> 問</small></div>
+      <div class="note">このページは苦手データを読み取るだけです。苦手リストの削除・変更は行いません。</div>
+    </div>
+
+    <div id="actions" class="actions">
+      <button id="copyBtn" class="main">問題＋正解を全文コピー</button>
+      <button id="shareBtn" class="sub">共有する</button>
+      <button id="saveBtn" class="sub">テキストファイルで保存</button>
+      <a class="btn sub" href="./ruikei.html.html">問題集へ戻る</a>
+      <div id="status" class="status"></div>
+    </div>
+
+    <div id="list"></div>
+  </main>
+</div>
+
+<script>
+const WKEY = "hanbaishi_weak_v1";
+const esc = s => String(s).replace(/[&<>\"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;"}[c]));
+const qid = q => q.s + "|" + q.q;
+let exportText = "";
+
+async function loadData(){
+  try{
+    const res = await fetch("./ruikei.html.html?export=" + Date.now(), {cache:"no-store"});
+    if(!res.ok) throw new Error("問題集データを取得できませんでした。");
+    const src = await res.text();
+
+    const secMatch = src.match(/const\s+SECTIONS\s*=\s*(\{[\s\S]*?\});\s*const\s+Q\s*=/);
+    const qMatch = src.match(/const\s+Q\s*=\s*(\[[\s\S]*?\]);\s*\/\/\s*----\s*STATE/);
+    if(!secMatch || !qMatch) throw new Error("問題集データの形式を読み取れませんでした。");
+
+    const SECTIONS = Function('"use strict";return (' + secMatch[1] + ')')();
+    const Q = Function('"use strict";return (' + qMatch[1] + ')')();
+
+    let weak = [];
+    try{ weak = JSON.parse(localStorage.getItem(WKEY)) || []; }catch(e){ weak = []; }
+    const list = Q.filter(q => weak.includes(qid(q)));
+
+    document.getElementById("loading").hidden = true;
+    document.getElementById("main").hidden = false;
+    document.getElementById("count").textContent = list.length;
+
+    if(!list.length){
+      document.getElementById("actions").style.display = "none";
+      document.getElementById("list").innerHTML = '<div class="empty">このブラウザには苦手問題が保存されていません。<br>いつも問題集を使っている同じiPhone・同じSafariで開いてください。</div>';
+      return;
+    }
+
+    exportText = "【販売士1級 苦手問題集】\n" +
+      "小売業の類型／間違えた問題 " + list.length + "問\n\n" +
+      list.map((q,i) =>
+        (i+1) + ". " + q.q.replace(/___/g,"【　　】") + "\n" +
+        "答え：" + q.a + "\n" +
+        "範囲：" + (SECTIONS[q.s] || "") + "／" + q.u
+      ).join("\n\n");
+
+    document.getElementById("list").innerHTML = list.map((q,i) =>
+      '<div class="item">' +
+        '<div class="meta">' + (i+1) + '／' + list.length + '　' + esc(SECTIONS[q.s] || "") + '／' + esc(q.u) + '</div>' +
+        '<div class="q">' + esc(q.q).replace(/___/g,"【　　】") + '</div>' +
+        '<div class="a">答え：' + esc(q.a) + '</div>' +
+      '</div>'
+    ).join("");
+
+    document.getElementById("copyBtn").onclick = copyAll;
+    document.getElementById("shareBtn").onclick = shareAll;
+    document.getElementById("saveBtn").onclick = saveText;
+  }catch(err){
+    document.getElementById("loading").className = "error";
+    document.getElementById("loading").textContent = "読み込みに失敗しました：" + err.message;
+  }
+}
+
+function setStatus(msg){
+  const el = document.getElementById("status");
+  el.textContent = msg;
+  setTimeout(()=>{ if(el.textContent === msg) el.textContent = ""; }, 2500);
+}
+
+async function copyAll(){
+  try{
+    await navigator.clipboard.writeText(exportText);
+    setStatus("全文をコピーしました");
+  }catch(e){
+    const ta = document.createElement("textarea");
+    ta.value = exportText;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+    setStatus("全文をコピーしました");
+  }
+}
+
+async function shareAll(){
+  if(navigator.share){
+    try{
+      await navigator.share({title:"販売士1級 苦手問題集", text:exportText});
+    }catch(e){}
+  }else{
+    await copyAll();
+  }
+}
+
+function saveText(){
+  const blob = new Blob([exportText], {type:"text/plain;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const d = new Date();
+  const ymd = d.getFullYear() + String(d.getMonth()+1).padStart(2,"0") + String(d.getDate()).padStart(2,"0");
+  a.href = url;
+  a.download = "hanbaishi_weak_" + ymd + ".txt";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  setStatus("テキストファイルを作成しました");
+}
+
+loadData();
+</script>
+</body>
+</html>
