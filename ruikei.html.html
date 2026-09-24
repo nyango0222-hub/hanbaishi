@@ -907,7 +907,22 @@ $("btnWeakQuiz").onclick = () => {
 };
 $("btnRvQuiz").onclick = () => startQuiz(weakQs(), false);
 $("rvShowAns").onchange = renderReview;
-$("btnRvPrint").onclick = () => window.print();
+$("btnRvPrint").onclick = () => {
+  const ua = navigator.userAgent;
+  const isLine  = /Line\//i.test(ua);
+  const isInApp = isLine || /FBAN|FBAV|Instagram|; wv\)|Claude/i.test(ua);
+  if (isLine) {
+    const u = new URL(location.href);
+    u.searchParams.set("openExternalBrowser", "1");
+    location.href = u.toString();
+    return;
+  }
+  if (isInApp || typeof window.print !== "function") {
+    alert("このアプリ内の画面では印刷できません。\n\nメニューから「Safari／Chromeで開く」を選び、もう一度このボタンを押してください。");
+    return;
+  }
+  window.print();
+};
 $("btnRvClear").onclick = () => {
   if(confirm(`苦手リスト（${weakQs().length}問）をすべて消去しますか？`)){
     weak = []; saveWeak(); renderReview(); refreshWeak();
