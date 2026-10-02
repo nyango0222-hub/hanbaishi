@@ -135,6 +135,7 @@
     <div class="sec-list" id="secList"></div>
     <label class="opt"><input type="checkbox" id="shuffle"> 出題順をシャッフルする（オフ＝教科書順）</label>
     <button class="btn-main" id="btnStart">開始する</button>
+    <button class="btn-sub hidden" id="btnResume" style="margin-top:10px">前回の続きから再開</button>
   </section>
 
   <!-- QUIZ -->
@@ -771,10 +772,80 @@ const Q = [
 ];
 
 // ---- STATE ---------------------------------------------------------
-let deck = [], idx = 0, ok = 0, ng = 0, wrong = [];
+let deck = [], idx = 0, ok = 0, ng = 0, wrong = [], revealed = false;
 const $ = id => document.getElementById(id);
 const show = (...ids) => { ["start","quiz","result","review"].forEach(i => $(i).classList.add("hidden")); ids.forEach(i => $(i).classList.remove("hidden")); window.scrollTo(0,0); };
 const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// ---- PROGRESS（途中保存・再開）--------------------------------------
+const PKEY = "hanbaishi_progress_v1";
+const progressQid = q => q.s + "|" + q.q;
+
+function readProgress(){
+  try{
+    const st = JSON.parse(localStorage.getItem(PKEY));
+    if(!st || !Array.isArray(st.deck) || !st.deck.length) return null;
+    if(!Number.isInteger(st.idx) || st.idx < 0 || st.idx >= st.deck.length) return null;
+    return st;
+  }catch(e){ return null; }
+}
+function saveProgress(){
+  if(!deck.length || idx < 0 || idx >= deck.length) return;
+  const st = {
+    v: 1,
+    deck: deck.map(progressQid),
+    idx,
+    ok,
+    ng,
+    wrong: wrong.map(progressQid),
+    revealed,
+    savedAt: Date.now()
+  };
+  try{ localStorage.setItem(PKEY, JSON.stringify(st)); }catch(e){}
+  refreshResume();
+}
+function clearProgress(){
+  try{ localStorage.removeItem(PKEY); }catch(e){}
+  refreshResume();
+}
+function refreshResume(){
+  const btn = $("btnResume");
+  if(!btn) return;
+  const st = readProgress();
+  if(!st){
+    btn.classList.add("hidden");
+    btn.textContent = "前回の続きから再開";
+    return;
+  }
+  btn.textContent = `前回の続きから再開（${st.idx + 1} / ${st.deck.length}）`;
+  btn.classList.remove("hidden");
+}
+function restoreProgress(){
+  const st = readProgress();
+  if(!st){ refreshResume(); return; }
+
+  const qmap = new Map(Q.map(q => [progressQid(q), q]));
+  const restoredDeck = st.deck.map(id => qmap.get(id));
+  if(restoredDeck.some(q => !q)){
+    clearProgress();
+    alert("問題データが更新されたため、前回の途中データをリセットしました。");
+    return;
+  }
+
+  deck = restoredDeck;
+  idx = st.idx;
+  ok = Number.isInteger(st.ok) ? st.ok : 0;
+  ng = Number.isInteger(st.ng) ? st.ng : 0;
+  wrong = Array.isArray(st.wrong) ? st.wrong.map(id => qmap.get(id)).filter(Boolean) : [];
+  revealed = !!st.revealed;
+  show("quiz");
+  render();
+}
+
+window.addEventListener("pagehide", saveProgress);
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState === "hidden") saveProgress();
+});
 
 
 // ---- START ---------------------------------------------------------
@@ -797,8 +868,9 @@ $("btnStart").onclick = () => {
 function startQuiz(list, shuffle){
   deck = list.slice();
   if(shuffle){ for(let i=deck.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [deck[i],deck[j]]=[deck[j],deck[i]]; } }
-  idx=0; ok=0; ng=0; wrong=[];
+  idx=0; ok=0; ng=0; wrong=[]; revealed=false;
   show("quiz"); render();
+  saveProgress();
 }
 
 // ---- QUIZ ----------------------------------------------------------
@@ -813,14 +885,25 @@ function render(){
   $("judgeRow").classList.add("hidden");
   $("btnReveal").classList.remove("hidden");
   $("okCnt").textContent = ok; $("ngCnt").textContent = ng;
+
+  if(revealed){
+    document.querySelectorAll(".blank").forEach(b=>b.classList.add("show"));
+    $("ansText").textContent = deck[idx].a;
+    $("ansBox").classList.remove("hidden");
+    $("btnReveal").classList.add("hidden");
+    $("judgeRow").classList.remove("hidden");
+  }
+  saveProgress();
 }
 
 $("btnReveal").onclick = () => {
+  revealed = true;
   document.querySelectorAll(".blank").forEach(b=>b.classList.add("show"));
   $("ansText").textContent = deck[idx].a;
   $("ansBox").classList.remove("hidden");
   $("btnReveal").classList.add("hidden");
   $("judgeRow").classList.remove("hidden");
+  saveProgress();
 };
 $("btnOk").onclick = () => judge(true);
 $("btnNg").onclick = () => judge(false);
@@ -828,13 +911,21 @@ function judge(correct){
   if(correct){ ok++; removeWeak(deck[idx]); }
   else { ng++; wrong.push(deck[idx]); addWeak(deck[idx]); }
   idx++;
+  revealed = false;
   if(idx >= deck.length) finish(); else render();
 }
-$("btnQuit").onclick = () => { if(confirm("中断してトップに戻りますか？")) show("start"); };
+$("btnQuit").onclick = () => {
+  if(confirm("中断してトップに戻りますか？\n途中経過は保存され、あとで続きから再開できます。")){
+    saveProgress();
+    show("start");
+    refreshResume();
+  }
+};
 
 
 // ---- RESULT --------------------------------------------------------
 function finish(){
+  clearProgress();
   $("rOk").textContent = ok; $("rTotal").textContent = deck.length;
   $("rRate").textContent = `正答率 ${Math.round(ok/deck.length*100)}%`;
   const wb = $("wrongBox");
@@ -929,8 +1020,10 @@ $("btnRvClear").onclick = () => {
   }
 };
 $("btnRvHome").onclick = () => show("start");
+$("btnResume").onclick = restoreProgress;
 
 refreshWeak();
+refreshResume();
 </script>
 </body>
 </html>
