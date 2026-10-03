@@ -998,20 +998,33 @@ $("btnWeakQuiz").onclick = () => {
 };
 $("btnRvQuiz").onclick = () => startQuiz(weakQs(), false);
 $("rvShowAns").onchange = renderReview;
-$("btnRvPrint").onclick = () => {
-  const ua = navigator.userAgent;
-  const isLine  = /Line\//i.test(ua);
-  const isInApp = isLine || /FBAN|FBAV|Instagram|; wv\)|Claude/i.test(ua);
+$("btnRvPrint").onclick = async () => {
+  const ua = navigator.userAgent || "";
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+  const isLine = /Line\//i.test(ua);
+  const isKnownInApp = /FBAN|FBAV|Instagram|; wv\)|Claude|ChatGPT|OpenAI/i.test(ua);
+  const isIOSBrowser = /Safari|CriOS|FxiOS|EdgiOS/i.test(ua);
+  const isIOSWebView = isIOS && !isIOSBrowser;
+  const isInApp = isLine || isKnownInApp || isIOSWebView;
+
   if (isLine) {
     const u = new URL(location.href);
     u.searchParams.set("openExternalBrowser", "1");
     location.href = u.toString();
     return;
   }
+
   if (isInApp || typeof window.print !== "function") {
-    alert("このアプリ内の画面では印刷できません。\n\nメニューから「Safari／Chromeで開く」を選び、もう一度このボタンを押してください。");
+    const url = location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      alert("このアプリ内ブラウザでは印刷画面を開けません。\n\nページのURLをコピーしました。\nSafariを開いてアドレス欄に貼り付け、このページを開いてから「印刷／PDFで保存」を押してください。");
+    } catch (e) {
+      alert("このアプリ内ブラウザでは印刷画面を開けません。\n\n右上のメニューなどから「Safariで開く」を選び、このページをSafariで開いてから「印刷／PDFで保存」を押してください。");
+    }
     return;
   }
+
   window.print();
 };
 $("btnRvClear").onclick = () => {
