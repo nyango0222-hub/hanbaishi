@@ -105,12 +105,18 @@
   .rv-a{margin-top:8px;font-size:14px;color:var(--navy);font-weight:700}
   .rv-del{background:#fff;color:var(--ink-soft);border:1px solid var(--line);font-size:12px;font-weight:500;padding:6px 10px;margin-top:10px;width:auto}
   .rv-empty{font-size:14px;color:var(--ink-soft);line-height:1.8;text-align:center;padding:30px 0}
+  #printSheet h2{font-size:18px;color:var(--navy);margin-bottom:14px}
+  #printSheet .print-note{font-size:12px;color:var(--ink-soft);margin-bottom:14px}
+  #printSheet .answer-key{margin-top:24px}
+  #printSheet .answer-key h2{margin-bottom:10px}
+  #printSheet .answer-key ol{padding-left:24px;font-size:14px;line-height:1.8}
   @media print{
     body{background:#fff}
     .app{max-width:none;padding:0}
-    #start,#quiz,#result,.stack,.opt,.rv-del,.meta{display:none!important}
-    #review{display:block!important}
-    .rv-item{break-inside:avoid;page-break-inside:avoid;border:0;border-bottom:1px dashed #bbb;border-radius:0;padding:8px 0}
+    .app > section,.app > header{display:none!important}
+    #printSheet{display:block!important}
+    #printSheet .rv-item{display:block!important;break-inside:avoid;page-break-inside:avoid;border:0;border-bottom:1px dashed #bbb;border-radius:0;padding:8px 0}
+    #printSheet .answer-key{break-before:page;page-break-before:always}
   }
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
   /* in-page dialog */
@@ -131,6 +137,13 @@
   <!-- START -->
   <section id="start">
     <p class="lead">出題する節を選び、開始。空欄を頭の中で答えてから「答えを見る」→ 自己採点します。</p>
+    <div class="weak-card hidden" id="resumeCard" style="border-color:var(--navy)">
+      <div class="weak-head" style="color:var(--navy)">途中の続き <b id="resumeCnt">0</b></div>
+      <div class="row">
+        <button class="btn-main" id="btnResume">途中から再開</button>
+        <button class="btn-sub" id="btnResumeClear">保存を消す</button>
+      </div>
+    </div>
     <div class="weak-card hidden" id="weakCard">
       <div class="weak-head">苦手リスト <b id="weakCnt">0</b> 問</div>
       <div class="row">
@@ -170,6 +183,7 @@
     <div class="wrong" id="wrongBox"></div>
     <div class="stack">
       <button class="btn-main hidden" id="btnRetryWrong">間違えた問題だけ再挑戦</button>
+      <button class="btn-sub hidden" id="btnPrintWrong">今回間違えた問題だけ印刷／PDF</button>
       <button class="btn-sub" id="btnResultReview">苦手問題集を見る（<span id="rWeakCnt">0</span>問）</button>
       <button class="btn-sub" id="btnHome">トップへ戻る</button>
     </div>
@@ -186,6 +200,9 @@
       <button class="btn-sub" id="btnRvHome">トップへ戻る</button>
     </div>
   </section>
+
+  <!-- PRINT ONLY -->
+  <section id="printSheet" class="hidden"></section>
 </div>
 
 <script>
@@ -676,7 +693,52 @@ const Q = [
 
 // ---- STATE ---------------------------------------------------------
 let deck = [], idx = 0, ok = 0, ng = 0, wrong = [];
+const PKEY = "hanbaishi_md_progress_v1";
+const sessionQid = q => q.s + "|" + q.q;
 const $ = id => document.getElementById(id);
+
+function getSavedSession(){
+  try{
+    const s = JSON.parse(localStorage.getItem(PKEY));
+    if(!s || !Array.isArray(s.deckIds) || !s.deckIds.length) return null;
+    if(!Number.isInteger(s.idx) || s.idx < 0 || s.idx >= s.deckIds.length) return null;
+    return s;
+  }catch(e){ return null; }
+}
+function refreshResume(){
+  const s = getSavedSession();
+  $("resumeCard").classList.toggle("hidden", !s);
+  if(s) $("resumeCnt").textContent = (s.idx + 1) + " / " + s.deckIds.length + "問目";
+}
+function saveSession(){
+  if(!deck.length || idx >= deck.length) return;
+  try{
+    localStorage.setItem(PKEY, JSON.stringify({
+      deckIds: deck.map(sessionQid),
+      idx, ok, ng,
+      wrongIds: wrong.map(sessionQid),
+      savedAt: Date.now()
+    }));
+  }catch(e){}
+  refreshResume();
+}
+function clearSession(){
+  try{ localStorage.removeItem(PKEY); }catch(e){}
+  refreshResume();
+}
+function resumeSession(){
+  const s = getSavedSession();
+  if(!s){ uiAlert("再開できる途中データがありません。"); refreshResume(); return; }
+  const map = new Map(Q.map(q => [sessionQid(q), q]));
+  deck = s.deckIds.map(id => map.get(id)).filter(Boolean);
+  wrong = (s.wrongIds || []).map(id => map.get(id)).filter(Boolean);
+  idx = Math.min(s.idx, Math.max(0, deck.length - 1));
+  ok = +s.ok || 0;
+  ng = +s.ng || 0;
+  if(!deck.length){ clearSession(); uiAlert("保存データを復元できませんでした。"); return; }
+  show("quiz");
+  render();
+}
 const show = (...ids) => { ["start","quiz","result","review"].forEach(i => $(i).classList.add("hidden")); ids.forEach(i => $(i).classList.remove("hidden")); window.scrollTo(0,0); };
 const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
@@ -697,11 +759,16 @@ $("btnStart").onclick = () => {
   let list = Q.filter(q=>secs.includes(q.s));
   startQuiz(list, $("shuffle").checked);
 };
+$("btnResume").onclick = resumeSession;
+$("btnResumeClear").onclick = async () => {
+  if(await uiConfirm("途中の保存データを消しますか？")) clearSession();
+};
 
 function startQuiz(list, shuffle){
   deck = list.slice();
   if(shuffle){ for(let i=deck.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [deck[i],deck[j]]=[deck[j],deck[i]]; } }
   idx=0; ok=0; ng=0; wrong=[];
+  saveSession();
   show("quiz"); render();
 }
 
@@ -732,13 +799,21 @@ function judge(correct){
   if(correct){ ok++; removeWeak(deck[idx]); }
   else { ng++; wrong.push(deck[idx]); addWeak(deck[idx]); }
   idx++;
-  if(idx >= deck.length) finish(); else render();
+  if(idx >= deck.length) finish();
+  else { saveSession(); render(); }
 }
-$("btnQuit").onclick = async () => { if(await uiConfirm("中断してトップに戻りますか？")) show("start"); };
+$("btnQuit").onclick = async () => {
+  if(await uiConfirm("中断してトップに戻りますか？")){
+    saveSession();
+    show("start");
+    refreshResume();
+  }
+};
 
 
 // ---- RESULT --------------------------------------------------------
 function finish(){
+  clearSession();
   $("rOk").textContent = ok; $("rTotal").textContent = deck.length;
   $("rRate").textContent = `正答率 ${Math.round(ok/deck.length*100)}%`;
   const wb = $("wrongBox");
@@ -746,16 +821,19 @@ function finish(){
     wb.innerHTML = `<h2>間違えた問題（${wrong.length}問）</h2><ol>` +
       wrong.map(q=>`<li>${esc(q.q).replace(/___/g,"【　　】")}<br><b>→ ${esc(q.a)}</b></li>`).join("") + `</ol>`;
     $("btnRetryWrong").classList.remove("hidden");
+    $("btnPrintWrong").classList.remove("hidden");
   } else {
     wb.innerHTML = `<p class="lead" style="text-align:center;margin-top:16px">全問正解。</p>`;
     $("btnRetryWrong").classList.add("hidden");
+    $("btnPrintWrong").classList.add("hidden");
   }
   $("rWeakCnt").textContent = weak.length;
   refreshWeak();
   show("result");
 }
 $("btnRetryWrong").onclick = () => startQuiz(wrong, false);
-$("btnHome").onclick = () => show("start");
+$("btnPrintWrong").onclick = () => printQuestions(wrong, "今回間違えた問題");
+$("btnHome").onclick = () => { show("start"); refreshResume(); };
 
 
 // ---- WEAK LIST（間違えた問題の蓄積）--------------------------------
@@ -811,7 +889,9 @@ $("btnWeakQuiz").onclick = () => {
 };
 $("btnRvQuiz").onclick = () => startQuiz(weakQs(), false);
 $("rvShowAns").onchange = renderReview;
-$("btnRvPrint").onclick = () => {
+function printQuestions(list, title){
+  if(!list.length){ uiAlert("印刷する問題がありません。"); return; }
+
   const ua = navigator.userAgent;
   const isLine  = /Line\//i.test(ua);
   const isInApp = isLine || /FBAN|FBAV|Instagram|; wv\)|Claude/i.test(ua);
@@ -825,16 +905,33 @@ $("btnRvPrint").onclick = () => {
     uiAlert("このアプリ内の画面では印刷できません。\n\nメニューから「Safari／Chromeで開く」を選び、もう一度このボタンを押してください。");
     return;
   }
+
+  $("printSheet").innerHTML =
+    `<h2>${esc(title)}（${list.length}問）</h2>` +
+    `<p class="print-note">問題編のあとに、解答編を別ページで印刷します。</p>` +
+    list.map((q,i) =>
+      `<div class="rv-item">
+        <div class="rv-meta">問題 ${i+1}　${esc(SECTIONS[q.s])}／${esc(q.u)}</div>
+        <div class="rv-q">${esc(q.q).replace(/___/g,"【　　】")}</div>
+      </div>`
+    ).join("") +
+    `<div class="answer-key">
+      <h2>解答</h2>
+      <ol>${list.map(q => `<li>${esc(q.a)}</li>`).join("")}</ol>
+    </div>`;
+
   window.print();
-};
+}
+$("btnRvPrint").onclick = () => printQuestions(weakQs(), "苦手問題集");
 $("btnRvClear").onclick = async () => {
   if(await uiConfirm(`苦手リスト（${weakQs().length}問）をすべて消去しますか？`)){
     weak = []; saveWeak(); renderReview(); refreshWeak();
   }
 };
-$("btnRvHome").onclick = () => show("start");
+$("btnRvHome").onclick = () => { show("start"); refreshResume(); };
 
 refreshWeak();
+refreshResume();
 </script>
 </body>
 </html>
