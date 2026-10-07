@@ -137,13 +137,6 @@
   <!-- START -->
   <section id="start">
     <p class="lead">出題する節を選び、開始。空欄を頭の中で答えてから「答えを見る」→ 自己採点します。</p>
-    <div class="weak-card hidden" id="resumeCard" style="border-color:var(--navy)">
-      <div class="weak-head" style="color:var(--navy)">途中の続き <b id="resumeCnt">0</b></div>
-      <div class="row">
-        <button class="btn-main" id="btnResume">途中から再開</button>
-        <button class="btn-sub" id="btnResumeClear">保存を消す</button>
-      </div>
-    </div>
     <div class="weak-card hidden" id="weakCard">
       <div class="weak-head">苦手リスト <b id="weakCnt">0</b> 問</div>
       <div class="row">
@@ -154,6 +147,7 @@
     <div class="sec-list" id="secList"></div>
     <label class="opt"><input type="checkbox" id="shuffle"> 出題順をシャッフルする（オフ＝教科書順）</label>
     <button class="btn-main" id="btnStart">開始する</button>
+    <button class="btn-sub hidden" id="btnResume" style="margin-top:10px">前回の続きから再開</button>
   </section>
 
   <!-- QUIZ -->
@@ -692,58 +686,83 @@ const Q = [
 ];
 
 // ---- STATE ---------------------------------------------------------
-let deck = [], idx = 0, ok = 0, ng = 0, wrong = [];
-const PKEY = "hanbaishi_md_progress_v1";
-const sessionQid = q => q.s + "|" + q.q;
+let deck = [], idx = 0, ok = 0, ng = 0, wrong = [], revealed = false;
 const $ = id => document.getElementById(id);
-
-function getSavedSession(){
-  try{
-    const s = JSON.parse(localStorage.getItem(PKEY));
-    if(!s || !Array.isArray(s.deckIds) || !s.deckIds.length) return null;
-    if(!Number.isInteger(s.idx) || s.idx < 0 || s.idx >= s.deckIds.length) return null;
-    return s;
-  }catch(e){ return null; }
-}
-function refreshResume(){
-  const s = getSavedSession();
-  $("resumeCard").classList.toggle("hidden", !s);
-  if(s) $("resumeCnt").textContent = (s.idx + 1) + " / " + s.deckIds.length + "問目";
-}
-function saveSession(){
-  if(!deck.length || idx >= deck.length) return;
-  try{
-    localStorage.setItem(PKEY, JSON.stringify({
-      deckIds: deck.map(sessionQid),
-      idx, ok, ng,
-      wrongIds: wrong.map(sessionQid),
-      savedAt: Date.now()
-    }));
-  }catch(e){}
-  refreshResume();
-}
-function clearSession(){
-  try{ localStorage.removeItem(PKEY); }catch(e){}
-  refreshResume();
-}
-function resumeSession(){
-  const s = getSavedSession();
-  if(!s){ uiAlert("再開できる途中データがありません。"); refreshResume(); return; }
-  const map = new Map(Q.map(q => [sessionQid(q), q]));
-  deck = s.deckIds.map(id => map.get(id)).filter(Boolean);
-  wrong = (s.wrongIds || []).map(id => map.get(id)).filter(Boolean);
-  idx = Math.min(s.idx, Math.max(0, deck.length - 1));
-  ok = +s.ok || 0;
-  ng = +s.ng || 0;
-  if(!deck.length){ clearSession(); uiAlert("保存データを復元できませんでした。"); return; }
-  show("quiz");
-  render();
-}
 const show = (...ids) => { ["start","quiz","result","review"].forEach(i => $(i).classList.add("hidden")); ids.forEach(i => $(i).classList.remove("hidden")); window.scrollTo(0,0); };
 const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+// ---- PROGRESS（途中保存・再開）--------------------------------------
+const PKEY = "hanbaishi_md_progress_v2";
+const progressQid = q => q.s + "|" + q.q;
 
-// ---- START ---------------------------------------------------------
+function readProgress(){
+  try{
+    const st = JSON.parse(localStorage.getItem(PKEY));
+    if(!st || !Array.isArray(st.deck) || !st.deck.length) return null;
+    if(!Number.isInteger(st.idx) || st.idx < 0 || st.idx >= st.deck.length) return null;
+    return st;
+  }catch(e){ return null; }
+}
+function saveProgress(){
+  if(!deck.length || idx < 0 || idx >= deck.length) return;
+  const st = {
+    v: 2,
+    deck: deck.map(progressQid),
+    idx,
+    ok,
+    ng,
+    wrong: wrong.map(progressQid),
+    revealed,
+    savedAt: Date.now()
+  };
+  try{ localStorage.setItem(PKEY, JSON.stringify(st)); }catch(e){}
+  refreshResume();
+}
+function clearProgress(){
+  try{ localStorage.removeItem(PKEY); }catch(e){}
+  refreshResume();
+}
+function refreshResume(){
+  const btn = $("btnResume");
+  if(!btn) return;
+  const st = readProgress();
+  if(!st){
+    btn.classList.add("hidden");
+    btn.textContent = "前回の続きから再開";
+    return;
+  }
+  btn.textContent = `前回の続きから再開（${st.idx + 1} / ${st.deck.length}）`;
+  btn.classList.remove("hidden");
+}
+function restoreProgress(){
+  const st = readProgress();
+  if(!st){ refreshResume(); return; }
+
+  const qmap = new Map(Q.map(q => [progressQid(q), q]));
+  const restoredDeck = st.deck.map(id => qmap.get(id));
+  if(restoredDeck.some(q => !q)){
+    clearProgress();
+    uiAlert("問題データが更新されたため、前回の途中データをリセットしました。");
+    return;
+  }
+
+  deck = restoredDeck;
+  idx = st.idx;
+  ok = Number.isInteger(st.ok) ? st.ok : 0;
+  ng = Number.isInteger(st.ng) ? st.ng : 0;
+  wrong = Array.isArray(st.wrong) ? st.wrong.map(id => qmap.get(id)).filter(Boolean) : [];
+  revealed = !!st.revealed;
+  show("quiz");
+  render();
+}
+
+window.addEventListener("pagehide", saveProgress);
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState === "hidden") saveProgress();
+});
+
+
+// ---- START ---------------------------------------------------------// ---- START ---------------------------------------------------------
 (function buildStart(){
   const box = $("secList");
   Object.keys(SECTIONS).forEach(k=>{
@@ -759,20 +778,17 @@ $("btnStart").onclick = () => {
   let list = Q.filter(q=>secs.includes(q.s));
   startQuiz(list, $("shuffle").checked);
 };
-$("btnResume").onclick = resumeSession;
-$("btnResumeClear").onclick = async () => {
-  if(await uiConfirm("途中の保存データを消しますか？")) clearSession();
-};
+$("btnResume").onclick = restoreProgress;
 
 function startQuiz(list, shuffle){
   deck = list.slice();
   if(shuffle){ for(let i=deck.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [deck[i],deck[j]]=[deck[j],deck[i]]; } }
-  idx=0; ok=0; ng=0; wrong=[];
-  saveSession();
+  idx=0; ok=0; ng=0; wrong=[]; revealed=false;
   show("quiz"); render();
+  saveProgress();
 }
 
-// ---- QUIZ ----------------------------------------------------------
+// ---- QUIZ ----------------------------------------------------------// ---- QUIZ ----------------------------------------------------------
 function render(){
   const q = deck[idx];
   $("secName").textContent = SECTIONS[q.s];
@@ -784,14 +800,25 @@ function render(){
   $("judgeRow").classList.add("hidden");
   $("btnReveal").classList.remove("hidden");
   $("okCnt").textContent = ok; $("ngCnt").textContent = ng;
+
+  if(revealed){
+    document.querySelectorAll(".blank").forEach(b=>b.classList.add("show"));
+    $("ansText").textContent = deck[idx].a;
+    $("ansBox").classList.remove("hidden");
+    $("btnReveal").classList.add("hidden");
+    $("judgeRow").classList.remove("hidden");
+  }
+  saveProgress();
 }
 
-$("btnReveal").onclick = () => {
+$("btnReveal").onclick = () => {$("btnReveal").onclick = () => {
+  revealed = true;
   document.querySelectorAll(".blank").forEach(b=>b.classList.add("show"));
   $("ansText").textContent = deck[idx].a;
   $("ansBox").classList.remove("hidden");
   $("btnReveal").classList.add("hidden");
   $("judgeRow").classList.remove("hidden");
+  saveProgress();
 };
 $("btnOk").onclick = () => judge(true);
 $("btnNg").onclick = () => judge(false);
@@ -799,21 +826,21 @@ function judge(correct){
   if(correct){ ok++; removeWeak(deck[idx]); }
   else { ng++; wrong.push(deck[idx]); addWeak(deck[idx]); }
   idx++;
-  if(idx >= deck.length) finish();
-  else { saveSession(); render(); }
+  revealed = false;
+  if(idx >= deck.length) finish(); else render();
 }
 $("btnQuit").onclick = async () => {
-  if(await uiConfirm("中断してトップに戻りますか？")){
-    saveSession();
+  if(await uiConfirm("中断してトップに戻りますか？\n途中経過は保存され、あとで続きから再開できます。")){
+    saveProgress();
     show("start");
     refreshResume();
   }
 };
 
 
-// ---- RESULT --------------------------------------------------------
+// ---- RESULT --------------------------------------------------------// ---- RESULT --------------------------------------------------------
 function finish(){
-  clearSession();
+  clearProgress();
   $("rOk").textContent = ok; $("rTotal").textContent = deck.length;
   $("rRate").textContent = `正答率 ${Math.round(ok/deck.length*100)}%`;
   const wb = $("wrongBox");
