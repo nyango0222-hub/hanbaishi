@@ -762,7 +762,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 
-// ---- START ---------------------------------------------------------// ---- START ---------------------------------------------------------
+// ---- START ---------------------------------------------------------
 (function buildStart(){
   const box = $("secList");
   Object.keys(SECTIONS).forEach(k=>{
@@ -788,7 +788,7 @@ function startQuiz(list, shuffle){
   saveProgress();
 }
 
-// ---- QUIZ ----------------------------------------------------------// ---- QUIZ ----------------------------------------------------------
+// ---- QUIZ ----------------------------------------------------------
 function render(){
   const q = deck[idx];
   $("secName").textContent = SECTIONS[q.s];
@@ -811,7 +811,7 @@ function render(){
   saveProgress();
 }
 
-$("btnReveal").onclick = () => {$("btnReveal").onclick = () => {
+$("btnReveal").onclick = () => {
   revealed = true;
   document.querySelectorAll(".blank").forEach(b=>b.classList.add("show"));
   $("ansText").textContent = deck[idx].a;
@@ -838,7 +838,7 @@ $("btnQuit").onclick = async () => {
 };
 
 
-// ---- RESULT --------------------------------------------------------// ---- RESULT --------------------------------------------------------
+// ---- RESULT --------------------------------------------------------
 function finish(){
   clearProgress();
   $("rOk").textContent = ok; $("rTotal").textContent = deck.length;
